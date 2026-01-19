@@ -1,0 +1,26 @@
+What does "forced" mean?	Forced means "unplanned" outages			
+MED or "med"?				Major Event Day calculated for the individual utility whereas if utility X had a MED, their outage values are explicitly excluded or included in the totals			
+MED excl					Values are excluded if they are part of a specific utilities MED			
+MED only					Values are included only if they are part of a specific utilities MED			
+
+
+If there's no "excl" or "only" in the sheet name, then all forced outages are included, i.e. MED included				
+"Combined" = "Comb excl MED" + "Comb only MED"				
+				
+				
+File name				Description			
+customer counts			The total number of customers reported by year and region			
+combined				Totals for all forced outages by day and region (includes major event days)			
+transmission			Totals for forced transmission outages by day and region (includes major event days)			
+distribution			Totals for forced distribution outages by day and region (includes major event days)			
+combined excl med		Totals for all forced outages by day and region (excludes major event days)			
+transmission excl med	Totals for forced transmission outages by day and region (excludes major event days)			
+distribution excl med	Totals for forced distribution outages by day and region (excludes major event days)			
+combined only med		Totals for all forced outages by day and region (only major event days included)			
+transmission only med	Totals for forced transmission outages by day and region (only major event days included)			
+distribution only med	Totals for forced distribution outages by day and region (only major event days included)			
+				
+				
+It is entirely plausible you will be able to associate a specific weather day to a part of a region, which may enable you to pinpoint a utility by name.
+
+Please urge caution upon learning of any correlations, and do not share such findings.				
