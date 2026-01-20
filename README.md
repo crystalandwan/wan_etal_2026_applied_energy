@@ -1,4 +1,4 @@
-# wan_etal_2025_applied_energy
+# wan_etal_2026_applied_energy
 
 **Fit for Purpose Power Outage Datasets: On using EAGLE-I and IEEE for Reliability Studies **
 
