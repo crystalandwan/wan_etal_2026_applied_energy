@@ -28,9 +28,6 @@ _your journal reference_
 Brelsford, C. et al. (2024). A dataset of recorded electricity outages by United States county 2014–2022. Scientific Data 11, 271. https://doi.org/10.1038/s41597-024-03095-5
 Caswell, H., & Jones, T. (2026). Anonymized IEEE Power Outage Data for the United States (1.0) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.18158530
 
-### Output data
-N.A.
-
 ## Reproduce my experiment
 Clone this repository to get access to the R codes used to analyze the IEEE and EAGLE-I outage datasets. You need to download EAGLEI-I outage dataset from https://doi.ccs.ornl.gov/ui/doi/435 and IEEE outage dataset from https://doi.org/10.5281/zenodo.18158530
 |Script Name | Description |
@@ -42,7 +39,7 @@ Clone this repository to get access to the R codes used to analyze the IEEE and 
 
 
 ## Reproduce my figures
-Use the scripts found in the `figures` directory to reproduce the figures used in this publication.
+Use the scripts found in the `scripts/figure_generation` directory to reproduce the figures used in this publication.
 
 | Figure Number(s) | Script Name | Description |
 | --- | --- | --- |
