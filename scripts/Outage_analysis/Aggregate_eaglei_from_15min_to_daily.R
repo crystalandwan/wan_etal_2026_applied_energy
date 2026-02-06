@@ -20,6 +20,15 @@ library(lubridate)
 library(dplyr)
 library(zoo)
 
+# Constants for EAGLE-I aggregation functions ----
+EAGLEI_RAW_INTERVAL_STRING <- "15 min" # Interval of raw EAGLE-I data
+EAGLEI_INTERVAL_DURATION_MINUTES <- 15 # Duration of a single EAGLE-I interval in minutes
+MISSING_CI_FILL_VALUE <- 0            # Value to fill for missing Customer Interruption
+LAG_OBSERVATIONS_COUNT <- 1           # Number of observations to lag by
+POSITIVE_DIFFERENCE_THRESHOLD <- 0    # Threshold for considering a CI difference as "positive"
+CI_MOVING_AVERAGE_WINDOW_DAYS <- 3    # Window size for daily CI moving average
+
+
 # Utility functions for EAGLE-I outage data aggregation ----
 
 # Function to aggregate CI by maximum method
@@ -46,7 +55,7 @@ aggregate_by_sum_positive_diff <- function(df) {
   time_range <- seq(
     from = min(df$run_start_time, na.rm = TRUE),
     to = max(df$run_start_time, na.rm = TRUE),
-    by = "15 min"
+    by = EAGLEI_RAW_INTERVAL_STRING
   )
   
   # Create a data frame with all fips_code and time combinations
@@ -59,7 +68,7 @@ aggregate_by_sum_positive_diff <- function(df) {
   df_complete <- complete_grid %>%
     left_join(df %>% select(fips_code, run_start_time, sum), 
               by = c("fips_code", "run_start_time")) %>%
-    mutate(sum = replace(sum, is.na(sum), 0)) %>%
+    mutate(sum = replace(sum, is.na(sum), MISSING_CI_FILL_VALUE)) %>%
     # Join with fips_lookup to fill county and state
     left_join(fips_lookup, by = "fips_code") %>%
     arrange(fips_code, run_start_time)
@@ -67,7 +76,7 @@ aggregate_by_sum_positive_diff <- function(df) {
   # Calculate CI differences
   df_complete <- df_complete %>%
     group_by(fips_code) %>%
-    mutate(prev_ci = lag(sum, n= 1, default = 0),
+    mutate(prev_ci = lag(sum, n= LAG_OBSERVATIONS_COUNT, default = MISSING_CI_FILL_VALUE),
            ci_diff = sum - prev_ci) %>%
     ungroup()
   
@@ -78,7 +87,7 @@ aggregate_by_sum_positive_diff <- function(df) {
     summarise(
       county = first(county),
       state = first(state),
-      daily_ci = sum(pmax(0, ci_diff), na.rm = TRUE),
+      daily_ci = sum(pmax(POSITIVE_DIFFERENCE_THRESHOLD, ci_diff), na.rm = TRUE),
       .groups = 'drop'
     )
   
@@ -86,7 +95,7 @@ aggregate_by_sum_positive_diff <- function(df) {
   df_complete <- df_complete %>%
     arrange(fips_code, Date) %>%
     group_by(fips_code) %>%
-    mutate(daily_ci_3day_avg = rollmean(daily_ci, k = 3, fill = NA, align = "center")) %>%
+    mutate(daily_ci_3day_avg = rollmean(daily_ci, k = CI_MOVING_AVERAGE_WINDOW_DAYS, fill = NA, align = "center")) %>%
     ungroup()
   
   return(df_complete)
@@ -105,7 +114,7 @@ calculate_customer_minutes <- function(outage_data) {
   daily_customer_minutes <- outage_data %>%
     group_by(Date, fips_code) %>%
     summarise(
-      total_customer_minutes = sum(sum * 15, na.rm = TRUE),
+      total_customer_minutes = sum(sum * EAGLEI_INTERVAL_DURATION_MINUTES, na.rm = TRUE),
       .groups = "drop"
     ) 
   return(daily_customer_minutes)

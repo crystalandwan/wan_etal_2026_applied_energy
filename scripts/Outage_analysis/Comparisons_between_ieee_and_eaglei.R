@@ -48,6 +48,52 @@ library(zoo)
 library(lubridate)  
 library(here)       
 
+# Constant setting ----
+# NERC ID to NERC Region mapping 
+NERC_ID_WECC <- c("1", "2", "6", "7")
+NERC_ID_MRO <- "18"
+NERC_ID_SPP <- "8"
+NERC_ID_TRE <- "3"
+NERC_ID_FRCC <- "4"
+NERC_ID_RFC <- "17"
+NERC_ID_SERC <- c("9", "10", "11", "12", "20")
+NERC_ID_NPCC <- c("5", "15")
+
+# Analysis Period Constants
+ANALYSIS_START_YEAR <- 2018
+ANALYSIS_END_YEAR <- 2022
+
+# Time Zone Mapping Specific Constants
+OUTLIER_COUNTY_FIPS1 <- "12087" # FIPS code for outlier county 1
+OUTLIER_COUNTY_FIPS2 <- "06075" # FIPS code for outlier county 2
+EASTERN_TZ_NAME <- "Eastern"
+EASTERN_TZ_UTC_OFFSET <- "-05:00"
+PACIFIC_TZ_NAME <- "Pacific"
+PACIFIC_TZ_UTC_OFFSET <- "-08:00"
+
+# Arizona Time Zone Handling Constants
+ARIZONA_COUNTIES_FIPS <- c(
+  "4001", "4003", "4005", "4007", "4009", "4011", "4012",
+  "4013", "4015", "4017", "4019", "4021", "4023", "4025", "4027"
+) # All AZ FIPS codes
+NAVAJO_NATION_FIPS <- "4017" # Specific FIPS for Navajo Nation (uses DST)
+MOUNTAIN_TZ_NAME <- "Mountain"
+PHOENIX_IANA_TZ <- "America/Phoenix" # AZ (no DST)
+DENVER_IANA_TZ <- "America/Denver" # Mountain (with DST)
+
+# Date Filtering Constants
+EAGLEI_FILTER_DATE_START <- "2014-11-01"
+EAGLEI_FILTER_DATE_END <- "2022-11-12"
+MERGED_FILTER_DATE_START <- "2018-01-01"
+MERGED_FILTER_DATE_END <- "2022-11-11"
+
+# Other Constants
+CI_PERCENT_THRESHOLD <- 0.25 # Select from various threshold scenarios including 0.25, 0.5, 1, and 2
+MOVING_AVG_DAY <- 3
+THOUSAND_UNIT <- 1000 # Convert value to thousands
+MILLION_UNIT <- 1000000 # Convert value to millions
+BREAKS = c(0, 0.25, 0.5, 1, 2, 5, 10, 20, 100, 200) # For histogram breaks
+
 # Source Configuration File ----
 config_path <- here::here("scripts", "Outage_analysis", "config.R")
 if (!file.exists(config_path)) {
@@ -74,14 +120,14 @@ if (!file.exists(counties_nerc_shp_path)) {
 counties_NERCs <- st_read(counties_nerc_shp_path) %>%
   mutate(
     NERC = case_when(
-      ID %in% c("1", "2", "6", "7") ~ "WECC",
-      ID == "18" ~ "MRO",
-      ID == "8" ~ "SPP",
-      ID == "3" ~ "TRE",
-      ID == "4" ~ "FRCC",
-      ID == "17" ~ "RFC",
-      ID %in% c("9", "10", "11", "12", "20") ~ "SERC",
-      ID %in% c("5", "15") ~ "NPCC",
+      ID %in% NERC_ID_WECC ~ "WECC",
+      ID == NERC_ID_MRO ~ "MRO",
+      ID == NERC_ID_SPP ~ "SPP",
+      ID == NERC_ID_TRE ~ "TRE",
+      ID == NERC_ID_FRCC ~ "FRCC",
+      ID == NERC_ID_RFC ~ "RFC",
+      ID %in% NERC_ID_SERC ~ "SERC",
+      ID %in% NERC_ID_NPCC ~ "NPCC",
       TRUE ~ NA_character_ # Handle any IDs not explicitly mapped
     )
   ) %>%
@@ -102,11 +148,11 @@ time_zone <- st_read(time_zone_shp_path) %>%
 counties_NERCs <- st_join(counties_NERCs, time_zone, join = st_intersects)
 
 # There are two counties that are not handled by this spatial join. Manually assign the time zone
-counties_NERCs[counties_NERCs$GEOID == "12087", "zone"] <- "Eastern"
-counties_NERCs[counties_NERCs$GEOID == "12087", "utc"] <- "-05:00"
+counties_NERCs[counties_NERCs$GEOID == OUTLIER_COUNTY_FIPS1, "zone"] <- EASTERN_TZ_NAME
+counties_NERCs[counties_NERCs$GEOID == OUTLIER_COUNTY_FIPS1, "utc"] <- EASTERN_TZ_UTC_OFFSET
 
-counties_NERCs[counties_NERCs$GEOID == "06075", "zone"] <- "Pacific"
-counties_NERCs[counties_NERCs$GEOID == "06075", "utc"] <- "-08:00"
+counties_NERCs[counties_NERCs$GEOID == OUTLIER_COUNTY_FIPS2, "zone"] <- PACIFIC_TZ_NAME
+counties_NERCs[counties_NERCs$GEOID == OUTLIER_COUNTY_FIPS2, "utc"] <- PACIFIC_TZ_UTC_OFFSET
 
 # Drop geometry
 counties_NERCs <- st_drop_geometry(counties_NERCs)
@@ -144,15 +190,11 @@ tz_mapping <- data.frame(
 
 # Adjust the UTC time to local time for each county
 # Handle Arizona counties (Mountain Time, no DST except Navajo Nation)
-arizona_counties <- c(
-  "4001", "4003", "4005", "4007", "4009", "4011", "4012",
-  "4013", "4015", "4017", "4019", "4021", "4023", "4025", "4027"
-) # All AZ FIPS codes
 eaglei_all <- eaglei_all %>%
   mutate(
     tz = case_when(
-      fips_code %in% arizona_counties & fips_code != "4017" & zone == "Mountain" ~ "America/Phoenix", # No DST
-      fips_code == "4017" & zone == "Mountain" ~ "America/Denver", # Navajo Nation uses DST
+      fips_code %in% ARIZONA_COUNTIES_FIPS & fips_code != NAVAJO_NATION_FIPS & zone == MOUNTAIN_TZ_NAME ~ PHOENIX_IANA_TZ, # No DST
+      fips_code == NAVAJO_NATION_FIPS & zone == MOUNTAIN_TZ_NAME ~ DENVER_IANA_TZ, # Navajo Nation uses DST
       TRUE ~ tz_mapping$tz[match(zone, tz_mapping$zone)]
     )
   )
@@ -191,7 +233,7 @@ eaglei_daily <- eaglei_daily %>%
   arrange(fips_code, Date)
 
 # Remove the first day (2014-11-01) and the last day (2022-11-12) as 3-day moving average will not work
-eaglei_daily <- eaglei_daily[!eaglei_daily$Date %in% c("2014-11-01", "2022-11-12"), ]
+eaglei_daily <- eaglei_daily[!eaglei_daily$Date %in% c(EAGLEI_FILTER_DATE_START, EAGLEI_FILTER_DATE_END), ]
 
 # Join county-NERC info to EAGLE-I
 eaglei_daily <- merge(eaglei_daily, counties_NERCs_sub[, c("fips_code", "NERC")], by = "fips_code")
@@ -231,7 +273,7 @@ IEEE_combined_NERC <- IEEE_combined_NERC %>%
   mutate(Date = as.Date(Date)) %>% # Ensure Date is in Date format for sorting
   arrange(NERC, Date) %>%
   group_by(NERC) %>%
-  mutate(CI_moving = rollmean(CI, k = 3, fill = NA, align = "center")) %>% # Corrected 'aligh' to 'align'
+  mutate(CI_moving = rollmean(CI, k = MOVING_AVG_DAY, fill = NA, align = "center")) %>% 
   ungroup()
 
 # Remove the dates with NA values in CI_moving (boundary conditions for moving average)
@@ -267,54 +309,51 @@ Merged <- merge(IEEE_combined_NERC, eaglei_combined_NERC, by = c("NERC", "Date")
 Merged$CI_per <- Merged$CI / Merged$customers_IEEE * 100
 
 # Extract records with overlapping time period
-Merged_2018_2022 <- Merged[Merged$Date >= "2018-01-01" & Merged$Date <= "2022-11-11", ]
+Merged_overlap <- Merged[Merged$Date >= MERGED_FILTER_DATE_START & Merged$Date <= MERGED_FILTER_DATE_END, ]
 
 # Obtain records with both valid records
-valid_2018_2022 <- Merged_2018_2022[!is.na(Merged_2018_2022$CI) & !is.na(Merged_2018_2022$daily_ci_3day_avg), ]
+Valid_overlap <- Merged_overlap[!is.na(Merged_overlap$CI) & !is.na(Merged_overlap$daily_ci_3day_avg), ]
 
 # Explore CI_per
-breaks = c(0, 0.25, 0.5, 1, 2, 5, 10, 20, 100, 200)
-valid_2018_2022$Range <- cut(valid_2018_2022$CI_per, breaks = breaks, right = TRUE, include.lowest = TRUE)
-table(valid_2018_2022$Range)
-hist(valid_2018_2022$CI_per, breaks = 1000, xlim = c(0, 10), xlab = "Percent of CI", 
+Valid_overlap$Range <- cut(Valid_overlap$CI_per, breaks = BREAKS, right = TRUE, include.lowest = TRUE)
+table(Valid_overlap$Range)
+hist(Valid_overlap$CI_per, breaks = 1000, xlim = c(0, 10), xlab = "Percent of CI", 
      main = "Histogram of Percent of CI (2018 - 2022)")
 
 # Filter the data frame by removing low CI%
-valid_2018_2022 <- valid_2018_2022[valid_2018_2022$CI_per > 0.25, ]
+Valid_overlap <- Valid_overlap[Valid_overlap$CI_per > CI_PERCENT_THRESHOLD, ]
 
 
 # Pearson's correlation coefficient between the two datasets
-cor(valid_2018_2022$CI, valid_2018_2022$max_customer)
-cor(valid_2018_2022$CMI, valid_2018_2022$customer_minutes)
-cor(valid_2018_2022$CI, valid_2018_2022$daily_ci)
-cor(valid_2018_2022$CI, valid_2018_2022$daily_ci_3day_avg)
-cor(valid_2018_2022$CI_moving, valid_2018_2022$daily_ci_3day_avg)
+cor(Valid_overlap$CI, Valid_overlap$max_customer)
+cor(Valid_overlap$CMI, Valid_overlap$customer_minutes)
+cor(Valid_overlap$CI, Valid_overlap$daily_ci)
+cor(Valid_overlap$CI, Valid_overlap$daily_ci_3day_avg)
+cor(Valid_overlap$CI_moving, Valid_overlap$daily_ci_3day_avg)
 
 # Spearman's rank correlation coefficient between the two datasets
-cor(valid_2018_2022$CI, valid_2018_2022$max_customer, method = "spearman")
-cor(valid_2018_2022$CMI, valid_2018_2022$customer_minutes, method = "spearman")
-cor(valid_2018_2022$CI, valid_2018_2022$daily_ci, method = "spearman")
-cor(valid_2018_2022$CI, valid_2018_2022$daily_ci_3day_avg, method = "spearman")
-cor(valid_2018_2022$CI_moving, valid_2018_2022$daily_ci_3day_avg, method = "spearman")
+cor(Valid_overlap$CI, Valid_overlap$max_customer, method = "spearman")
+cor(Valid_overlap$CMI, Valid_overlap$customer_minutes, method = "spearman")
+cor(Valid_overlap$CI, Valid_overlap$daily_ci, method = "spearman")
+cor(Valid_overlap$CI, Valid_overlap$daily_ci_3day_avg, method = "spearman")
+cor(Valid_overlap$CI_moving, Valid_overlap$daily_ci_3day_avg, method = "spearman")
 
 # Comparison between the aggregation methods
-plot(valid_2018_2022$max_customer/1000, valid_2018_2022$daily_ci/1000,
+plot(Valid_overlap$max_customer/THOUSAND_UNIT, Valid_overlap$daily_ci/THOUSAND_UNIT,
      xlab = "Daily max (in thousands)",
      ylab = "Sum_positive_diff (in thousands)",
-     # xlim = c(0, 9000),
-     # ylim = c(0, 9000),
-     col = as.factor(valid_2018_2022$NERC),
+     col = as.factor(Valid_overlap$NERC),
      main = "CI comparison for all NERC regions by aggregation method")
 abline(a = 0, b = 1,
        col = "red",        # Set line color (e.g., red)
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
-legend("topright", legend = unique(as.factor(valid_2018_2022$NERC)), 
-       col = unique(as.factor(valid_2018_2022$NERC)), pch = 1, title = "NERC Regions")
+legend("topright", legend = unique(as.factor(Valid_overlap$NERC)), 
+       col = unique(as.factor(Valid_overlap$NERC)), pch = 1, title = "NERC Regions")
 
-boxplot(log(valid_2018_2022$max_customer), 
-        log(valid_2018_2022$daily_ci), 
-        log(valid_2018_2022$daily_ci_3day_avg),
+boxplot(log(Valid_overlap$max_customer), 
+        log(Valid_overlap$daily_ci), 
+        log(Valid_overlap$daily_ci_3day_avg),
         names = c("EAGLE-I_daily_max", "EAGLE-I_sum_positive_diff", "EAGLE-I_Moving_avg"), 
         ylab = "Log (CI)", 
         las = 1)
@@ -322,12 +361,12 @@ boxplot(log(valid_2018_2022$max_customer),
 
 ## Compare the two outage datasets for all NERC regions
 # (IEEE CI v.s. daily max)
-plot(valid_2018_2022$CI/1000, valid_2018_2022$max_customer/1000,
+plot(Valid_overlap$CI/THOUSAND_UNIT, Valid_overlap$max_customer/THOUSAND_UNIT,
      xlab = "IEEE CI (in thousands)",
      ylab = "EAGLE-I CI-daily_max (in thousands)",
      xlim = c(0, 4000),
      ylim = c(0, 4000),
-     col = as.factor(valid_2018_2022$NERC),
+     col = as.factor(Valid_overlap$NERC),
      main = "CI comparison for all NERC regions",
      cex.main = 2,
      cex.lab = 1.5)
@@ -335,11 +374,11 @@ abline(a = 0, b = 1,
        col = "red",        # Set line color (e.g., red)
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
-legend("topright", legend = unique(as.factor(valid_2018_2022$NERC)), 
-       col = unique(as.factor(valid_2018_2022$NERC)), pch = 1, title = "NERC Regions")
-boxplot(log(valid_2018_2022$CI), log(valid_2018_2022$CI_moving), 
-        log(valid_2018_2022$max_customer), log(valid_2018_2022$daily_ci), 
-        log(valid_2018_2022$daily_ci_3day_avg),
+legend("topright", legend = unique(as.factor(Valid_overlap$NERC)), 
+       col = unique(as.factor(Valid_overlap$NERC)), pch = 1, title = "NERC Regions")
+boxplot(log(Valid_overlap$CI), log(Valid_overlap$CI_moving), 
+        log(Valid_overlap$max_customer), log(Valid_overlap$daily_ci), 
+        log(Valid_overlap$daily_ci_3day_avg),
         names = c("IEEE", "IEEE_moving_avg", "EAGLE-I_daily_max", "EAGLE-I_sum_positive_diff", 
                   "EAGLE-I_Moving_avg"), 
         # ylim = c(0, 16),
@@ -347,12 +386,12 @@ boxplot(log(valid_2018_2022$CI), log(valid_2018_2022$CI_moving),
         las = 1)
 
 # (IEEE CI v.s sum_positive_diff)
-plot(valid_2018_2022$CI/1000, valid_2018_2022$daily_ci/1000,
+plot(Valid_overlap$CI/THOUSAND_UNIT, Valid_overlap$daily_ci/THOUSAND_UNIT,
      xlab = "IEEE CI (in thousands)",
      ylab = "EAGLE-I CI-sum_diff (in thousands)",
      xlim = c(0, 8500),
      ylim = c(0, 8500),
-     col = as.factor(valid_2018_2022$NERC),
+     col = as.factor(Valid_overlap$NERC),
      main = "CI comparison for all NERC regions", 
      cex.main = 2, 
      cex.lab = 1.5)
@@ -360,16 +399,16 @@ abline(a = 0, b = 1,
        col = "red",        # Set line color (e.g., red)
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
-legend("topright", legend = unique(as.factor(valid_2018_2022$NERC)), 
-       col = unique(as.factor(valid_2018_2022$NERC)), pch = 1, title = "NERC Regions")
+legend("topright", legend = unique(as.factor(Valid_overlap$NERC)), 
+       col = unique(as.factor(Valid_overlap$NERC)), pch = 1, title = "NERC Regions")
 
 # (IEEE CI v.s moving avg)
-plot(valid_2018_2022$CI/1000, valid_2018_2022$daily_ci_3day_avg/1000,
+plot(Valid_overlap$CI/THOUSAND_UNIT, Valid_overlap$daily_ci_3day_avg/THOUSAND_UNIT,
      xlab = "IEEE CI (in thousands)",
      ylab = "EAGLE-I CI-moving_avg (in thousands)",
      xlim = c(0, 7000),
      ylim = c(0, 7000),
-     col = as.factor(valid_2018_2022$NERC),
+     col = as.factor(Valid_overlap$NERC),
      main = "CI comparison for all NERC regions", 
      cex.main = 2, 
      cex.lab = 1.5)
@@ -377,31 +416,31 @@ abline(a = 0, b = 1,
        col = "red",        # Set line color (e.g., red)
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
-legend("topright", legend = unique(as.factor(valid_2018_2022$NERC)), 
-       col = unique(as.factor(valid_2018_2022$NERC)), pch = 1, title = "NERC Regions")
+legend("topright", legend = unique(as.factor(Valid_overlap$NERC)), 
+       col = unique(as.factor(Valid_overlap$NERC)), pch = 1, title = "NERC Regions")
 
 # (IEEE CI moving v.s moving avg)
-plot(valid_2018_2022$CI_moving/1000, valid_2018_2022$daily_ci_3day_avg/1000,
+plot(Valid_overlap$CI_moving/THOUSAND_UNIT, Valid_overlap$daily_ci_3day_avg/THOUSAND_UNIT,
      xlab = "IEEE CI-moving_avg (in thousands)",
      ylab = "EAGLE-I CI-moving_avg (in thousands)",
      xlim = c(0, 7000),
      ylim = c(0, 7000),
-     col = as.factor(valid_2018_2022$NERC),
+     col = as.factor(Valid_overlap$NERC),
      main = "CI comparison for all NERC regions")
 abline(a = 0, b = 1,
        col = "red",        # Set line color (e.g., red)
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
-legend("topright", legend = unique(as.factor(valid_2018_2022$NERC)), 
-       col = unique(as.factor(valid_2018_2022$NERC)), pch = 1, title = "NERC Regions")
+legend("topright", legend = unique(as.factor(Valid_overlap$NERC)), 
+       col = unique(as.factor(Valid_overlap$NERC)), pch = 1, title = "NERC Regions")
 
 # (CMI comparisons)
-plot(valid_2018_2022$CMI/1000000, valid_2018_2022$customer_minutes/1000000, 
+plot(Valid_overlap$CMI/MILLION_UNIT, Valid_overlap$customer_minutes/MILLION_UNIT, 
      xlab = "IEEE CMI (in millions)", 
      ylab = "EAGLE-I CMI (in millions)", 
      xlim = c(0, 5000),
      ylim = c(0, 5000),
-     col = as.factor(valid_2018_2022$NERC),
+     col = as.factor(Valid_overlap$NERC),
      main = "CMI comparison for all NERC regions", 
      cex.main = 2, 
      cex.lab = 1.5)
@@ -409,21 +448,18 @@ abline(a = 0, b = 1,
        col = "red",        # Set line color (e.g., red)
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
-legend("topright", legend = unique(as.factor(valid_2018_2022$NERC)), 
-       col = unique(as.factor(valid_2018_2022$NERC)), pch = 1, title = "NERC Regions")
+legend("topright", legend = unique(as.factor(Valid_overlap$NERC)), 
+       col = unique(as.factor(Valid_overlap$NERC)), pch = 1, title = "NERC Regions")
 
-boxplot(log(valid_2018_2022$CMI), log(valid_2018_2022$customer_minutes), 
+boxplot(log(Valid_overlap$CMI), log(Valid_overlap$customer_minutes), 
         names = c("IEEE", "EAGLE-I"), 
         ylab = "Log (CMI)", 
         las = 1)
 
 
-
-
-
 ## Comparison for each NERC region
 nerc <- "TRE"
-target <- valid_2018_2022[valid_2018_2022$NERC == nerc, ]
+target <- Valid_overlap[Valid_overlap$NERC == nerc, ]
 
 
 # (CI v.s daily max)
@@ -431,12 +467,12 @@ cor(target$CI, target$max_customer)
 cor(target$CI, target$max_customer, method= "spearman")
 
 
-plot(target$CI/1000, target$max_customer/1000, 
+plot(target$CI/THOUSAND_UNIT, target$max_customer/THOUSAND_UNIT, 
      xlab = "IEEE CI (in thousands)", 
      ylab = "Daily max (in thousands)", 
      xlim = c(0, 1200),
      ylim = c(0, 1200),
-     col = valid_2018_2022$year,
+     col = Valid_overlap$year,
      main = nerc)
 
 abline(a = 0, b = 1,
@@ -444,8 +480,8 @@ abline(a = 0, b = 1,
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
 
-legend("topright", legend = unique(valid_2018_2022$year), 
-       col = unique(valid_2018_2022$year), pch = 1, title = "Years")
+legend("topright", legend = unique(Valid_overlap$year), 
+       col = unique(Valid_overlap$year), pch = 1, title = "Years")
 
 boxplot(log(target$CI), log(target$max_customer), 
         names = c("IEEE", "EAGLE-I"), 
@@ -456,12 +492,10 @@ boxplot(log(target$CI), log(target$max_customer),
 cor(target$CI, target$daily_ci)
 cor(target$CI, target$daily_ci, method = "spearman")
 
-plot(target$CI/1000, target$daily_ci/1000, 
+plot(target$CI/THOUSAND_UNIT, target$daily_ci/THOUSAND_UNIT, 
      xlab = "IEEE CI (in thousands)", 
      ylab = "Sum_positive_diff (in thousands)", 
-     # xlim = c(0, 1200),
-     # ylim = c(0, 1200),
-     col = valid_2018_2022$year,
+     col = Valid_overlap$year,
      main = nerc)
 
 abline(a = 0, b = 1,
@@ -469,8 +503,8 @@ abline(a = 0, b = 1,
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
 
-legend("topright", legend = unique(valid_2018_2022$year), 
-       col = unique(valid_2018_2022$year), pch = 1, title = "Years")
+legend("topright", legend = unique(Valid_overlap$year), 
+       col = unique(Valid_overlap$year), pch = 1, title = "Years")
 
 boxplot(log(target$CI), log(target$daily_ci), 
         names = c("IEEE", "EAGLE-I"), 
@@ -481,12 +515,10 @@ boxplot(log(target$CI), log(target$daily_ci),
 cor(target$CI, target$daily_ci_3day_avg)
 cor(target$CI, target$daily_ci_3day_avg, method = "spearman")
 
-plot(target$CI/1000, target$daily_ci_3day_avg/1000, 
+plot(target$CI/THOUSAND_UNIT, target$daily_ci_3day_avg/THOUSAND_UNIT, 
      xlab = "IEEE CI (in thousands)", 
      ylab = "Moving avg (in thousands)", 
-     # xlim = c(0, 750),
-     # ylim = c(0, 750),
-     col = valid_2018_2022$year,
+     col = Valid_overlap$year,
      main = nerc)
 
 abline(a = 0, b = 1,
@@ -494,8 +526,8 @@ abline(a = 0, b = 1,
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
 
-legend("topright", legend = unique(valid_2018_2022$year), 
-       col = unique(valid_2018_2022$year), pch = 1, title = "Years")
+legend("topright", legend = unique(Valid_overlap$year), 
+       col = unique(Valid_overlap$year), pch = 1, title = "Years")
 
 boxplot(log(target$CI), log(target$daily_ci_3day_avg), 
         names = c("IEEE", "EAGLE-I"), 
@@ -506,12 +538,10 @@ boxplot(log(target$CI), log(target$daily_ci_3day_avg),
 cor(target$CI_moving, target$daily_ci_3day_avg)
 cor(target$CI_moving, target$daily_ci_3day_avg, method = "spearman")
 
-plot(target$CI_moving/1000, target$daily_ci_3day_avg/1000, 
+plot(target$CI_moving/THOUSAND_UNIT, target$daily_ci_3day_avg/THOUSAND_UNIT, 
      xlab = "IEEE CI_moving (in thousands)", 
      ylab = "Moving avg (in thousands)", 
-     # xlim = c(0, 550),
-     # ylim = c(0, 550),
-     col = valid_2018_2022$year,
+     col = Valid_overlap$year,
      main = nerc)
 
 abline(a = 0, b = 1,
@@ -519,8 +549,8 @@ abline(a = 0, b = 1,
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
 
-legend("topleft", legend = unique(valid_2018_2022$year), 
-       col = unique(valid_2018_2022$year), pch = 1, title = "Years")
+legend("topleft", legend = unique(Valid_overlap$year), 
+       col = unique(Valid_overlap$year), pch = 1, title = "Years")
 
 boxplot(log(target$CI), log(target$daily_ci_3day_avg), 
         names = c("IEEE", "EAGLE-I"), 
@@ -528,14 +558,12 @@ boxplot(log(target$CI), log(target$daily_ci_3day_avg),
         las = 1)
 
 # Calculate correlation coefficient and generate scatterplot for each NERC region for CMI
-target <- valid_2018_2022[valid_2018_2022$NERC == "TRE", ]
+target <- Valid_overlap[Valid_overlap$NERC == "TRE", ]
 cor(target$CMI, target$customer_minutes)
-plot(target$CMI/1000000, target$customer_minutes/1000000, 
+plot(target$CMI/MILLION_UNIT, target$customer_minutes/MILLION_UNIT, 
      xlab = "IEEE CMI (in millions)", 
      ylab = "EAGLE-I CMI (in millions)", 
-     # xlim = c(0, 550),
-     # ylim = c(0, 550),
-     col = valid_2018_2022$year,
+     col = Valid_overlap$year,
      main = "TRE")
 
 abline(a = 0, b = 1,
@@ -543,8 +571,8 @@ abline(a = 0, b = 1,
        lty = 2,            # Set line type (e.g., 2 for dashed)
        lwd = 1.5)          # Set line width (optional)
 
-legend("topright", legend = unique(valid_2018_2022$year), 
-       col = unique(valid_2018_2022$year), pch = 1, title = "Years")
+legend("topright", legend = unique(Valid_overlap$year), 
+       col = unique(Valid_overlap$year), pch = 1, title = "Years")
 
 boxplot(log(target$CMI), log(target$customer_minutes), 
         names = c("IEEE", "EAGLE-I"), 

@@ -37,6 +37,23 @@ library(zoo)
 library(lubridate)  
 library(here)       
 
+# Setting Constants ----
+# General Data Processing Constants
+NA_FILL_OUTAGE_VALUE <- 0 # Value to fill for missing outage data (CI/CMI)
+DATE_START_SUFFIX <- "-01-01" # Suffix for constructing start date of year
+DATE_END_SUFFIX <- "-12-31"  # Suffix for constructing end date of year
+
+# Rolling Sum Constants
+ROLLING_WINDOW_DAYS <- 365    # Window size for annual rolling sums
+ROLLING_HALF_WINDOW_DIVISOR <- 2 # Divisor for calculating half-window exclusion
+
+# Analysis Period Constants (for main script execution)
+EAGLEI_PROCESS_START_YEAR <- 2018
+EAGLEI_PROCESS_END_YEAR <- 2022
+IEEE_PROCESS_START_YEAR <- 2003
+IEEE_PROCESS_END_YEAR <- 2023
+
+
 # Source Configuration File ----
 config_path <- here::here("scripts", "Outage_analysis", "config.R")
 if (!file.exists(config_path)) {
@@ -81,7 +98,7 @@ if (exists("ieee_versions_to_process") && is.list(ieee_versions_to_process)) {
 #' @param window_width Numeric. The width of the rolling window (default: 365 days).
 #' @param align_type Character. Alignment of the window ("center", "left", "right").
 #' @return The input data frame with new columns named `rolling_<column_name>`.
-calculate_rolling_sums <- function(df, columns_to_roll, window_width = 365, align_type = "center") {
+calculate_rolling_sums <- function(df, columns_to_roll, window_width = ROLLING_WINDOW_DAYS, align_type = "center") {
   for (col_name in columns_to_roll) {
     new_col_name <- paste0("rolling_", col_name)
     df[[new_col_name]] <- rollapply(
@@ -144,17 +161,17 @@ process_eaglei_reliability <- function(coverage_path, nerc_daily_path, start_yea
   eaglei_conus <- merge(eaglei_conus, coverage_conus, by = "year", all.x = TRUE)
   
   # Generate a complete date sequence for the analysis period
-  full_date_sequence <- as.IDate(seq(as.Date(paste0(start_year, "-01-01")), as.Date(paste0(end_year, "-12-31")), by = "day"))
+  full_date_sequence <- as.IDate(seq(as.Date(paste0(start_year, DATE_START_SUFFIX)), as.Date(paste0(end_year, DATE_END_SUFFIX)), by = "day"))
   
   # Create a complete data frame to account for missing dates (dates with no outage)
   eaglei_conus_complete <- data.frame(Date = full_date_sequence) %>%
     left_join(eaglei_conus, by = "Date") %>%
     # Fill in missing values (assume zero CI/CMI for missing dates)
     mutate(
-      max_customer = ifelse(is.na(max_customer), 0, max_customer),
-      daily_ci = ifelse(is.na(daily_ci), 0, daily_ci),
-      daily_ci_3day_avg = ifelse(is.na(daily_ci_3day_avg), 0, daily_ci_3day_avg),
-      customer_minutes = ifelse(is.na(customer_minutes), 0, customer_minutes)
+      max_customer = ifelse(is.na(max_customer), NA_FILL_OUTAGE_VALUE, max_customer),
+      daily_ci = ifelse(is.na(daily_ci), NA_FILL_OUTAGE_VALUE, daily_ci),
+      daily_ci_3day_avg = ifelse(is.na(daily_ci_3day_avg), NA_FILL_OUTAGE_VALUE, daily_ci_3day_avg),
+      customer_minutes = ifelse(is.na(customer_minutes), NA_FILL_OUTAGE_VALUE, customer_minutes)
       # annual coverage numbers (total_min_covered, total_max_covered) will be filled by year
     ) %>%
     # Fill `year` and `total_min_covered`/`total_max_covered` by year
@@ -197,11 +214,11 @@ process_eaglei_reliability <- function(coverage_path, nerc_daily_path, start_yea
   # Filter the result to exclude the partial rolling window periods (first/last 182 days)
   # This ensures that only valid center-aligned 365-day rolling sums are included.
   # The 'window_width' / 2 determines the number of days to filter from each end.
-  days_to_exclude_each_end <- floor(365 / 2)
+  days_to_exclude_each_end <- floor(ROLLING_WINDOW_DAYS / ROLLING_HALF_WINDOW_DIVISOR)
   eaglei_final <- eaglei_conus_complete %>%
     filter(
-      Date >= (as.Date(paste0(start_year, "-01-01")) + days_to_exclude_each_end) &
-        Date <= (as.Date(paste0(end_year, "-12-31")) - days_to_exclude_each_end)
+      Date >= (as.Date(paste0(start_year, DATE_START_SUFFIX)) + days_to_exclude_each_end) &
+        Date <= (as.Date(paste0(end_year, DATE_END_SUFFIX)) - days_to_exclude_each_end)
     )
   
   # Write out the result
@@ -256,15 +273,15 @@ process_ieee_reliability <- function(ieee_outages_path, ieee_customer_counts_pat
   ieee_conus <- merge(ieee_conus, ieee_coverage_conus, by = "Year", all.x = TRUE)
   
   # Generate a complete date sequence for the analysis period
-  full_date_sequence <- as.IDate(seq(as.Date(paste0(start_year, "-01-01")), as.Date(paste0(end_year, "-12-31")), by = "day"))
+  full_date_sequence <- as.IDate(seq(as.Date(paste0(start_year, DATE_START_SUFFIX)), as.Date(paste0(end_year, DATE_END_SUFFIX)), by = "day"))
   
   # Create a complete data frame to account for missing dates (dates with no outage)
   ieee_conus_complete <- data.frame(Date = full_date_sequence) %>%
     left_join(ieee_conus, by = "Date") %>%
     # Fill in missing values (assume zero CI/CMI for missing dates)
     mutate(
-      CI = ifelse(is.na(CI), 0, CI),
-      CMI = ifelse(is.na(CMI), 0, CMI)
+      CI = ifelse(is.na(CI), NA_FILL_OUTAGE_VALUE, CI),
+      CMI = ifelse(is.na(CMI), NA_FILL_OUTAGE_VALUE, CMI)
     ) %>%
     # Fill `Year` and `total_customers` by year
     group_by(Year) %>%
@@ -289,11 +306,11 @@ process_ieee_reliability <- function(ieee_outages_path, ieee_customer_counts_pat
     )
   
   # Filter the result to exclude the partial rolling window periods (first/last 182 days)
-  days_to_exclude_each_end <- floor(365 / 2)
+  days_to_exclude_each_end <- floor(ROLLING_WINDOW_DAYS / ROLLING_HALF_WINDOW_DIVISOR)
   ieee_final <- ieee_conus_complete %>%
     filter(
-      Date >= (as.Date(paste0(start_year, "-01-01")) + days_to_exclude_each_end) &
-        Date <= (as.Date(paste0(end_year, "-12-31")) - days_to_exclude_each_end)
+      Date >= (as.Date(paste0(start_year, DATE_START_SUFFIX)) + days_to_exclude_each_end) &
+        Date <= (as.Date(paste0(end_year, DATE_END_SUFFIX)) - days_to_exclude_each_end)
     )
   
   # Write out the result
@@ -315,8 +332,8 @@ message("Starting CONUS-level reliability metrics calculation.")
 eaglei_reliability_results <- process_eaglei_reliability(
   coverage_path = eaglei_coverage_nerc_path,
   nerc_daily_path = eaglei_nerc_time_adjusted_path,
-  start_year = 2018,
-  end_year = 2022,
+  start_year = EAGLEI_PROCESS_START_YEAR,
+  end_year = EAGLEI_PROCESS_END_YEAR,
   output_filename = eaglei_reliability_path
 )
 
@@ -338,8 +355,8 @@ for (version_info in ieee_versions_to_process) {
   ieee_reliability_results <- process_ieee_reliability(
     ieee_outages_path = current_ieee_outages_path,
     ieee_customer_counts_path = ieee_customers_path,
-    start_year = 2003,
-    end_year = 2023,
+    start_year = IEEE_PROCESS_START_YEAR,
+    end_year = IEEE_PROCESS_END_YEAR,
     output_filename = current_output_filename
   )
 }

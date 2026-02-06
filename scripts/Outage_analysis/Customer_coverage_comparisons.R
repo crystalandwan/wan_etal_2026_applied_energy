@@ -41,6 +41,25 @@ if (!file.exists(config_path)) {
 }
 source(config_path)
 
+# --- constants setting ---
+# NERC ID to NERC Region mapping
+NERC_ID_WECC <- c("1", "2", "6", "7")
+NERC_ID_MRO <- "18"
+NERC_ID_SPP <- "8"
+NERC_ID_TRE <- "3"
+NERC_ID_FRCC <- "4"
+NERC_ID_RFC <- "17"
+NERC_ID_SERC <- c("9", "10", "11", "12", "20")
+NERC_ID_NPCC <- c("5", "15")
+
+# Data Processing Constants
+FIPS_PAD_WIDTH <- 5       # Width for padding FIPS codes
+FIPS_PAD_CHAR <- "0"
+
+# Analysis Period Constants
+ANALYSIS_START_YEAR <- 2018
+ANALYSIS_END_YEAR <- 2022
+
 # Validate all essential input paths defined in config.R ---
 if (!file.exists(eaglei_coverage_path)) {
   stop(paste("Error: EAGLE-I coverage history file not found at:", eaglei_coverage_path))
@@ -77,18 +96,19 @@ pop_data <- pop_data[, c("GEOCODE", "STUSAB", "COUNTY", "U7H001")]
 colnames(pop_data) <- c("GEOID", "state", "county", "pop2020")
 
 # Pad GEOID to ensure 5-digit FIPS code consistency
-pop_data$GEOID <- str_pad(pop_data$GEOID, width = 5, side = "left", pad = "0")
+pop_data$GEOID <- str_pad(pop_data$GEOID, width = FIPS_PAD_WIDTH, side = "left", pad = FIPS_PAD_CHAR)
 
 # Exclude non-CONUS US states/territories from population data
 pop_data <- pop_data[!pop_data$state %in% c("HI", "AK", "PR")]
 
 # 3. Downscale State-level EAGLE-I Coverage to County Level ----
 message("Downscaling state-level EAGLE-I coverage to county level...")
+
 # Initialize an empty dataframe to store results
 county_results <- data.frame()
 
-# Loop through each year (2018 to 2022)
-for (yr in 2018:2022) {
+# Loop through each analysis year
+for (yr in ANALYSIS_START_YEAR:ANALYSIS_END_YEAR) {
   # Filter coverage data for the current year
   coverage_year <- coverage[coverage$year == yr, ]
   
@@ -133,14 +153,14 @@ counties_NERCs_sub <- st_read(counties_nerc_shp_path)
 counties_NERCs_sub <- counties_NERCs_sub %>%
   mutate(
     NERC = case_when(
-      ID %in% c("1", "2", "6", "7") ~ "WECC",
-      ID == "18" ~ "MRO",
-      ID == "8" ~ "SPP",
-      ID == "3" ~ "TRE",
-      ID == "4" ~ "FRCC",
-      ID == "17" ~ "RFC",
-      ID %in% c("9", "10", "11", "12", "20") ~ "SERC",
-      ID %in% c("5", "15") ~ "NPCC",
+      ID %in% NERC_ID_WECC ~ "WECC",
+      ID == NERC_ID_MRO ~ "MRO",
+      ID == NERC_ID_SPP ~ "SPP",
+      ID == NERC_ID_TRE ~ "TRE",
+      ID == NERC_ID_FRCC ~ "FRCC",
+      ID == NERC_ID_RFC ~ "RFC",
+      ID %in% NERC_ID_SERC ~ "SERC",
+      ID %in% NERC_ID_NPCC ~ "NPCC",
       TRUE ~ NA_character_ # Handle any IDs not explicitly mapped
     )
   )
@@ -175,8 +195,8 @@ IEEE <- fread(ieee_customers_path)
 # Aggregate IEEE data from region level to NERC level
 IEEE_NERC <- IEEE[, .(customers_IEEE = sum(Customers, na.rm = TRUE)), by = .(NERC, Year)]
 
-# Extract IEEE data between 2018 and 2022 ()
-IEEE_NERC <- IEEE_NERC[IEEE_NERC$Year >= 2018 & IEEE_NERC$Year <= 2022, ]
+# Extract IEEE data between start and end analysis year
+IEEE_NERC <- IEEE_NERC[IEEE_NERC$Year >= ANALYSIS_START_YEAR & IEEE_NERC$Year <= ANALYSIS_END_YEAR, ]
 
 # Rename 'SPP RE' to 'SPP' for consistency with EAGLE-I data
 IEEE_NERC[IEEE_NERC$NERC == "SPP RE", "NERC"] <- "SPP"
@@ -189,7 +209,7 @@ joined <- merge(coverage_NERC, IEEE_NERC, by = c("NERC", "year"), all.x = TRUE)
 
 # 8. Print National-level Summaries ----
 message("\n--- National-level Customer Count Summaries ---")
-for (yr in 2018:2022) {
+for (yr in ANALYSIS_START_YEAR:ANALYSIS_END_YEAR) {
   target <- coverage[coverage$year == yr, ]
   message(paste0("Sum of total customers in ", yr, " for the whole CONUS (EAGLE-I) is: ", sum(target$total_customers, na.rm = TRUE)))
   message(paste0("Sum of min covered customers in ", yr, " for the whole CONUS (EAGLE-I) is: ", sum(target$min_covered, na.rm = TRUE)))
