@@ -63,19 +63,18 @@ source(config_path)
 
 # Validate all essential input paths defined in config.R---
 
-# Validate eaglei_coverage_nerc_path
 if (!file.exists(eaglei_coverage_nerc_path)) {
   stop(paste("Error: EAGLE-I NERC-level coverage data file not found at:", eaglei_coverage_nerc_path))
 }
-# Validate eaglei_nerc_time_adjusted_path
+
 if (!file.exists(eaglei_nerc_time_adjusted_path)) {
   stop(paste("Error: Processed EAGLE-I NERC-level daily data file not found at:", eaglei_nerc_time_adjusted_path))
 }
-# Validate ieee_customers_path (used in both IEEE processing calls)
+
 if (!file.exists(ieee_customers_path)) {
   stop(paste("Error: IEEE customer counts data file not found at:", ieee_customers_path))
 }
-# Validate paths for IEEE outage data based on ieee_versions_to_process
+
 if (exists("ieee_versions_to_process") && is.list(ieee_versions_to_process)) {
   for (version_info in ieee_versions_to_process) {
     if (!file.exists(version_info$path)) {
@@ -83,8 +82,9 @@ if (exists("ieee_versions_to_process") && is.list(ieee_versions_to_process)) {
     }
   }
 } else {
-  stop("Error: 'ieee_versions_to_process' not defined or not a list in config.R.")
+  stop("Error: 'ieee_versions_to_process' not defined or not a list in config.R. Cannot validate IEEE outage data paths.")
 }
+message("All essential input data paths validated successfully.")
 
 # --- Utility Functions ---
 

@@ -73,6 +73,7 @@ if (!file.exists(counties_nerc_shp_path)) {
 if (!file.exists(ieee_customers_path)) {
   stop(paste("Error: IEEE customer counts file not found at:", ieee_customers_path))
 }
+message("All essential input data paths validated successfully.")
 
 # --- Start of Main Script Logic ---
 

@@ -97,17 +97,38 @@ BREAKS = c(0, 0.25, 0.5, 1, 2, 5, 10, 20, 100, 200) # For histogram breaks
 
 # Source Configuration File ----
 config_path <- here::here("scripts", "Outage_analysis", "config.R")
+
 if (!file.exists(config_path)) {
-  stop("The configuration file does not exist. Ensure the correct path:", config_path)
+  stop(paste("Error: The configuration file not found at:", config_path))
 }
+
 source(config_path)
 
 # Source EAGLE-I Aggregation Functions ----
 if (!file.exists(eaglei_agg_script_path)) {
-  stop("The EAGLE-I aggregation script does not exist. Ensure the correct path:", eaglei_agg_script_path)
+  stop(paste("Error: The EAGLE-I aggregation script not found at:", eaglei_agg_script_path))
 }
+
 source(eaglei_agg_script_path)
 
+# Validate all essential input paths defined in config.R---
+
+if (!file.exists(counties_nerc_shp_path)) {
+  stop(paste("Error: Counties to NERC mapping shapefile not found at:", counties_nerc_shp_path))
+}
+if (!file.exists(time_zone_shp_path)) {
+  stop(paste("Error: Time Zone shapefile not found at:", time_zone_shp_path))
+}
+if (!dir.exists(eaglei_raw_data_dir)) {
+  stop(paste("Error: EAGLE-I raw data directory not found at:", eaglei_raw_data_dir))
+}
+if (!file.exists(ieee_combined_path)) {
+  stop(paste("Error: IEEE combined outage data file not found at:", ieee_combined_path))
+}
+if (!file.exists(ieee_customers_path)) {
+  stop(paste("Error: IEEE customer counts data file not found at:", ieee_customers_path))
+}
+message("All essential input data paths validated successfully.")
 
 # --- Main Script Logic ---
 
@@ -115,9 +136,6 @@ source(eaglei_agg_script_path)
 message("1. Preparing geographic and time zone data...")
 
 # Read in county-NERC mapping shapefile
-if (!file.exists(counties_nerc_shp_path)) {
-  stop(paste("Error: Primary shapefile (counties_NERC) not found at:", counties_nerc_shp_path))
-}
 counties_NERCs <- st_read(counties_nerc_shp_path) %>%
   mutate(
     NERC = case_when(
@@ -138,9 +156,6 @@ counties_NERCs <- st_read(counties_nerc_shp_path) %>%
 counties_NERCs <- st_centroid(counties_NERCs)
 
 # Read in time zone shapefile
-if (!file.exists(time_zone_shp_path)) {
-  stop(paste("Error: Primary shapefile (time_zone) not found at:", time_zone_shp_path))
-}
 time_zone <- st_read(time_zone_shp_path) %>%
   st_transform(crs = st_crs(counties_NERCs)) %>% # Transform for consistent CRS
   st_make_valid() # Fix any invalid geometries
@@ -163,9 +178,6 @@ counties_NERCs <- st_drop_geometry(counties_NERCs)
 message("2. Loading and pre-processing raw EAGLE-I data (15-min interval)...")
 
 # Get list of EAGLE-I data files
-if (!dir.exists(eaglei_raw_data_dir)) {
-  stop(paste("Error: EAGLE-I raw data directory not found at:", eaglei_raw_data_dir))
-}
 eaglei_file_paths <- list.files(
   path = eaglei_raw_data_dir,
   pattern = paste0("^", "eaglei_outages_", "(\\d{4})", ".csv$"),
@@ -173,7 +185,7 @@ eaglei_file_paths <- list.files(
 )
 
 if (length(eaglei_file_paths) == 0) {
-  stop("No EAGLE-I raw data files found for the specified years. Check paths and year range in config.R.")
+  stop(paste("Error: No EAGLE-I raw data files found for the specified years matching pattern 'eaglei_outages_YYYY.csv' in:", eaglei_raw_data_dir))
 }
 
 # Read all EAGLE-I files and combine them
@@ -250,6 +262,10 @@ eaglei_NERC <- eaglei_daily[, .(max_customer = sum(max_customer, na.rm = TRUE),
                             by = .(NERC, Date)]
 
 # Write out the NERC-level EAGLE-I with time adjusted to local time
+output_dir_eaglei_nerc_time_adjusted <- dirname(eaglei_nerc_time_adjusted_path)
+if (!dir.exists(output_dir_eaglei_nerc_time_adjusted)) {
+  dir.create(output_dir_eaglei_nerc_time_adjusted, recursive = TRUE)
+}
 fwrite(eaglei_NERC, eaglei_nerc_time_adjusted_path)
 
 
@@ -257,9 +273,6 @@ fwrite(eaglei_NERC, eaglei_nerc_time_adjusted_path)
 message("4. Loading and preparing IEEE dataset...")
 
 # Read in IEEE combined outage data
-if (!file.exists(ieee_combined_path)) {
-  stop(paste("Error: IEEE combined outage data file not found at:", ieee_combined_path))
-}
 IEEE_combined <- fread(ieee_combined_path)
 
 # Rename "SPP RE" to "SPP" for consistency
@@ -284,9 +297,6 @@ IEEE_combined_NERC <- IEEE_combined_NERC[!is.na(IEEE_combined_NERC$CI_moving), ]
 IEEE_combined_NERC$year <- year(IEEE_combined_NERC$Date)
 
 # Read in IEEE customer data
-if (!file.exists(ieee_customers_path)) {
-  stop(paste("Error: IEEE customer count data file not found at:", ieee_customers_path))
-}
 IEEE_customer <- fread(ieee_customers_path)
 
 # Rename "SPP RE" to "SPP" for consistency
